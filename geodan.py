@@ -7,9 +7,9 @@ from kbds import get_callback_btns
 import os
 from dotenv import find_dotenv, load_dotenv
 from kivy.support import install_twisted_reactor
+from threading import Thread
 
-
-
+ewr = 'Писька'
 load_dotenv(find_dotenv())
 token = os.getenv("TOKEN")
 
@@ -18,6 +18,12 @@ bot = Bot(token=token)
 dp = Dispatcher()
 
 class GeoApp(App):
+    def __init__(self, chat_id, **kwargs):
+        super().__init__(**kwargs)
+        self.chat_id = 1020323448
+        self.loop = asyncio.get_event_loop()
+
+
     def build(self):
         # Конфигурация GPS
         try:
@@ -28,15 +34,14 @@ class GeoApp(App):
         return  # Пустой интерфейс
 
     def on_location(self, **kwargs):
-        # Сохраняем последние координаты
-        self.last_location = (kwargs['lat'], kwargs['lon'])
+        lat, lon = kwargs['lat'], kwargs['lon']
+        # Отправляем координаты и закрываем приложение
+        asyncio.run_coroutine_threadsafe(
+            bot.send_location(chat_id=self.chat_id, latitude=lat, longitude=lon),
+            self.loop
+        )
+        self.stop()
 
-    async def send_location(self, chat_id):
-        if hasattr(self, 'last_location'):
-            lat, lon = self.last_location
-            await bot.send_location(chat_id=chat_id, latitude=lat, longitude=lon)
-        else:
-            await bot.send_message(chat_id, "Геоданные недоступны")
 
 # Обработчики для бота
 @dp.message(F.text == 'start')
@@ -46,9 +51,12 @@ async def start_handler(message: types.Message):
 
 @dp.callback_query(F.data == 'get_geodata')
 async def get_geodata_handler(callback: types.CallbackQuery):
-    geo_app = GeoApp.get_running_app()
-    await geo_app.send_location(callback.from_user.id)
-    await callback.answer()
+    def run_geo_app():
+        app = GeoApp(chat_id=callback.from_user.id)
+        app.run()
+    Thread(target=run_geo_app).start()
+    await callback.answer("Запрос отправлен, ожидайте координаты.")
+
 
 @dp.message(Command("stop"))
 async def stop_app(message: types.Message):
@@ -57,15 +65,10 @@ async def stop_app(message: types.Message):
 
 async def main():
     await dp.start_polling(bot)
+    await bot.sent_message(chat_id=1020323448, text="Бот запущен!")  # Замените на ваш chat_id
 
 if __name__ == '__main__':
-    # Запуск Kivy и бота в разных потоках
-    from threading import Thread
-
-    geo_app = GeoApp()
-    Thread(target=geo_app.run).start()
-    
+    install_twisted_reactor()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(main())
-    install_twisted_reactor()
